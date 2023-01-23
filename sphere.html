@@ -1,0 +1,128 @@
+<html>
+
+<head>
+    <script type='text/javascript' src='https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js'></script>
+    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/three.js/0.148.0/three.min.js'></script>
+    <style>
+        body {
+            overflow: hidden;
+            margin: 0px;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="viewport"></canvas>
+    <canvas id="debug"></canvas>
+    <script type='text/javascript'>
+        const icosVertRaw = [0, 0, -1.902, 0, 0, 1.902, -1.701, 0, -0.8507, 1.701, 0, 0.8507, 1.376, -1.000, -0.8507, 1.376, 1.000, -0.8507, -1.376, -1.000, 0.8507, -1.376, 1.000, 0.8507, -0.5257, -1.618, -0.8507, -0.5257, 1.618, -0.8507, 0.5257, -1.618, 0.8507, 0.5257, 1.618, 0.8507];
+        const icosVert = [];
+        for (var i = 0; i < icosVertRaw.length; i += 3) {
+            icosVert.push(new THREE.Vector3(icosVertRaw[i + 0], icosVertRaw[i + 1], icosVertRaw[i + 2]).normalize());
+        }
+        var icosInd = [[1, 11, 7], [1, 7, 6], [1, 6, 10], [1, 10, 3], [1, 3, 11], [4, 8, 0], [5, 4, 0], [9, 5, 0], [2, 9, 0], [8, 2, 0], [11, 9, 7], [7, 2, 6], [6, 8, 10], [10, 4, 3], [3, 5, 11], [4, 10, 8], [5, 3, 4], [9, 11, 5], [2, 7, 9], [8, 6, 2]];
+        const MAX_DEPTH = 5;
+        function tesselate(a, b, c, depth, points, ind, camPos) {
+            const dab = a.distanceTo(b);
+            const dist = camPos.distanceTo(a);
+            const costh = dab / dist;
+            if (depth == MAX_DEPTH || costh < 0.1) {
+                points[ind + 0] = a.x;
+                points[ind + 1] = a.y;
+                points[ind + 2] = a.z;
+                points[ind + 3] = b.x;
+                points[ind + 4] = b.y;
+                points[ind + 5] = b.z;
+                points[ind + 6] = c.x;
+                points[ind + 7] = c.y;
+                points[ind + 8] = c.z;
+                return ind + 9;
+            } else {
+                const ab = a.clone().add(b).normalize();
+                const ac = a.clone().add(c).normalize();
+                const bc = b.clone().add(c).normalize();
+                ind = tesselate(a, ab, ac, depth + 1, points, ind, camPos);
+                ind = tesselate(b, bc, ab, depth + 1, points, ind, camPos);
+                ind = tesselate(c, ac, bc, depth + 1, points, ind, camPos);
+                return tesselate(ab, bc, ac, depth + 1, points, ind, camPos);
+            }
+        }
+
+        function updateSphere(geom, camX) {
+            var ind = 0;
+            const points = geom.attributes.position.array
+            const camPos = new THREE.Vector3(camX, 0, 0);
+            icosInd.forEach(face => {
+                ind = tesselate(icosVert[face[0]], icosVert[face[1]], icosVert[face[2]], 0, points, ind, camPos);
+            });
+            geom.setDrawRange(0, ind / 3);
+            geom.attributes.position.needsUpdate = true;
+        }
+
+        const scene = new THREE.Scene();
+
+        const camera1 = new THREE.PerspectiveCamera(75, 1, 0.1, 100);
+        const camera2 = new THREE.PerspectiveCamera(75, 1, 0.1, 100);
+
+        camera1.position.x = 2;
+        camera2.position.y = 5;
+        camera1.lookAt(new THREE.Vector3(0, 0, 0));
+        camera2.lookAt(new THREE.Vector3(0, 0, 0));
+
+        const canvas1 = document.getElementById("viewport");
+        const canvas2 = document.getElementById("debug");
+        const renderer1 = new THREE.WebGLRenderer({ canvas: canvas1 });
+        renderer1.setSize(600, 600);
+        const renderer2 = new THREE.WebGLRenderer({ canvas: canvas2 });
+        renderer2.setSize(600, 600)
+
+        const meshMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            wireframe: true,
+        });
+        const lambertMaterial = new THREE.MeshLambertMaterial({
+            color: 0x00cc00,
+        });
+
+        const icosGeom = new THREE.BufferGeometry();
+        const positions = new Float32Array(500000 * 3);
+        icosGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        updateSphere(icosGeom, camera1.position.x);
+        //icosGeom.computeVertexNormals();
+        const icos = new THREE.Mesh(icosGeom, meshMaterial);
+        scene.add(icos);
+
+        const spotLight = new THREE.SpotLight(0xffffff);
+        spotLight.position.set(100, 100, 100);
+        scene.add(spotLight);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        // draw the camera for the debug view
+        const dotGeometry = new THREE.BufferGeometry();
+        dotGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([2, 0, 0]), 3));
+        const dot = new THREE.Points(
+            dotGeometry,
+            new THREE.PointsMaterial({ size: 0.1, color: 0xff0000 })
+        );
+        scene.add(dot);
+
+        var cameradx = -0.01;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (camera1.position.x < 1.1 || camera1.position.x > 4) {
+                cameradx *= -1;
+            }
+            camera1.position.x += cameradx;
+            dot.translateX(cameradx);
+            updateSphere(icosGeom, camera1.position.x);
+
+            renderer1.render(scene, camera1);
+            renderer2.render(scene, camera2);
+        }
+
+        $(window).on("load", animate);
+    </script>
+</body>
+
+</html>
